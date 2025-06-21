@@ -121,7 +121,9 @@ def main():
                         if 'forces' in row and row['forces'] is not None:
                              atoms.arrays['forces'] = row['forces']
 
-                        filename = os.path.join(output_dir, f"{index.replace('#', '_')}.xyz")
+                        # Convert index to string to handle both integer and string indices gracefully
+                        safe_filename = str(index).replace('#', '_')
+                        filename = os.path.join(output_dir, f"{safe_filename}.xyz")
                         ase_write(filename, atoms, format='extxyz')
 
                     logging.info("--- Selected Candidates Summary ---")
