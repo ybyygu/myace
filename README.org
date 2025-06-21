@@ -1,0 +1,6 @@
+* Memo
+** TODO [2025-06-20 Fri] pace_activeset 需要从 python-ace/lib/maxvolpy 中安装
+: pace_activeset -d collected.pckl.gzip output_potential.yaml
+
+基于外推等级及 D-optimality 选择合适的训练集.
+: ace-learn output_potential.yaml collected_data.pckl.gzip --asi output_potential.asi --output-selection-dir selected-structures/ --select 10 --gamma-threshold 0.9

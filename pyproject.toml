@@ -1,0 +1,36 @@
+[project]
+name = "myace"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Wenping Guo", email = "ybyygu@gmail.com" }
+]
+dependencies = [
+    "tensorflow==2.16.1",
+    "pip>=25.1.1",
+    "tensorpotential @ file:///home/ybyygu/Incoming/python/ace/TensorPotential",
+    "pyace @ file:///home/ybyygu/Incoming/python/ace/python-ace",
+    "ipython>=8.18.1",
+    "maxvolpy @ file:///home/ybyygu/Incoming/python/ace/python-ace/lib/maxvolpy/maxvolpy-0.3.8-cp312-cp312-linux_x86_64.whl",
+    "cython>=3.1.2",
+    "tqdm>=4.67.1",
+]
+readme = "README.md"
+
+[project.scripts]
+collect-data = "myace.cli.collect_data:main"
+ace-learn = "myace.cli.active_learning_tool:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = []
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/myace"]
