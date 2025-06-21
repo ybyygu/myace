@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-Command-line tool to parse raw data from computational chemistry codes
-or other formats and build a pacemaker-compatible DataFrame.
+Command-line tool to parse raw data from various sources and build a
+pacemaker-compatible DataFrame. This is a thin wrapper around the
+`myace.data_processing.build_dataset` API function.
 """
 import argparse
 import logging
 import json
+import sys
 
 # We are now inside the 'myace' package, so we can use relative imports
-from ..data_processing import (
-    parse_vasp_outcar, 
-    parse_extxyz_directory, 
-    build_pacemaker_dataframe
-)
+from ..data_processing import build_dataset
+from ..io import write as write_df
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
@@ -62,7 +61,7 @@ def main():
     
     args = parser.parse_args()
 
-    # --- 1. Load reference energies from JSON ---
+    # --- 1. Load reference energies from JSON if provided ---
     ref_energies_dict = {}
     if args.ref_energies:
         try:
@@ -71,45 +70,40 @@ def main():
             logging.info(f"Successfully loaded reference energies from '{args.ref_energies}'.")
         except FileNotFoundError:
             logging.error(f"Error: Reference energy file not found at '{args.ref_energies}'.")
-            return
+            sys.exit(1)
         except json.JSONDecodeError:
             logging.error(f"Error: Could not parse the JSON file at '{args.ref_energies}'. Please ensure it is valid JSON.")
-            return
-    else:
-        logging.info("No reference energy file provided. All elemental reference energies will be treated as 0.")
-
-    # --- 2. Parse source data using the appropriate parser ---
+            sys.exit(1)
+    
+    # --- 2. Call the high-level API to build the dataset ---
     try:
-        if args.format == 'vasp':
-            parsed_data = parse_vasp_outcar(args.input_path, args.selection)
-        elif args.format == 'extxyz':
-            parsed_data = parse_extxyz_directory(args.input_path, args.selection)
-        else:
-            # This case should not be reached due to 'choices' in argparse
-            logging.error(f"Unknown format: {args.format}")
-            return
-    except FileNotFoundError as e:
+        logging.info(f"Building dataset from '{args.input_path}' with format '{args.format}'...")
+        df = build_dataset(
+            input_path=args.input_path,
+            format=args.format,
+            selection=args.selection,
+            ref_energies=ref_energies_dict
+        )
+    except (ValueError, FileNotFoundError) as e:
         logging.error(e)
-        return
+        sys.exit(1)
     except Exception as e:
-        logging.error(f"An unexpected error occurred during parsing: {e}")
-        return
+        logging.error(f"An unexpected error occurred during dataset creation: {e}")
+        sys.exit(1)
 
-    # --- 3. Build and save the DataFrame ---
-    if not parsed_data:
-        logging.warning("No data was parsed. Exiting without creating an output file.")
+    # --- 3. Save the resulting DataFrame ---
+    if df.empty:
+        logging.warning("No data was parsed or processed. Exiting without creating an output file.")
         return
         
     try:
-        df = build_pacemaker_dataframe(parsed_data, ref_energies_dict)
-        df.to_pickle(args.output, compression='gzip', protocol=4)
+        write_df(df, args.output)
         logging.info(f"Successfully saved {len(df)} configurations to '{args.output}'.")
         print("\n--- Output file summary ---")
-        df.info()
-    except ValueError as e:
-        logging.error(e)
+        df.info(verbose=False)
     except Exception as e:
-        logging.error(f"An unexpected error occurred during DataFrame creation: {e}")
+        logging.error(f"An unexpected error occurred while saving the file: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

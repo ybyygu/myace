@@ -18,15 +18,16 @@ This toolkit is designed to support two primary workflows common in potential de
 **Goal:** To intelligently select the most valuable new structures for expensive DFT calculations from a large pool of unlabeled candidates (e.g., from an MD simulation).
 
 **Conceptual Flow:**
+
 ```mermaid
 graph TD
     subgraph "Phase 1: Explore & Select"
-        A[MD Trajectory<br><i>(many unlabeled structures)</i>] -->|`collect-data --format extxyz`| B(structures_to_eval.pckl.gzip);
+        A["MD Trajectory<br><i>(many unlabeled structures)</i>"] -->|`collect-data --format extxyz`| B(structures_to_eval.pckl.gzip);
         C[current_model.yaml] --> D["ace-learn --select N"];
         B --> D;
         D --> E[selected_for_dft/];
     end
-    
+
     subgraph "Phase 2: Calculate & Collect"
         E --> F["<b>Manual Step:</b><br>Run DFT on structures in the directory"];
         F -->|`collect-data --format extxyz`| G(new_labeled_data.pckl.gzip);
@@ -40,24 +41,30 @@ graph TD
 
 **Step-by-Step Guide:**
 
-1.  **Prepare Exploration Set**: Use `collect-data` to parse a large number of unlabeled structures (e.g., from a LAMMPS dump or `.xyz` trajectory) into a standardized DataFrame.
-    ```bash
-    # This creates a DataFrame with 'name' and 'ase_atoms' columns
-    rye run collect-data /path/to/md/trajectory/ --format extxyz --output structures_to_eval.pckl.gzip
-    ```
-2.  **Evaluate & Select**: Use `ace-learn` with your current potential to evaluate these structures and select the `N` most uncertain candidates.
-    ```bash
-    rye run ace-learn current_potential.yaml structures_to_eval.pckl.gzip --asi current_potential.asi --select 20 --output-selection-dir selected_for_dft
-    ```
-    This creates a directory `selected_for_dft/` containing 20 `.xyz` files, ready for calculation.
+1. **Prepare Exploration Set**: Use `collect-data` to parse a large number of unlabeled structures (e.g., from a LAMMPS dump or `.xyz` trajectory) into a standardized DataFrame.
 
-3.  **Perform DFT Calculations**: This is a manual step. Run high-accuracy DFT calculations on the structures inside the `selected_for_dft/` directory. It's recommended to save the results by overwriting the existing `.xyz` files, as `ase.io.write` will embed the new energy and forces.
+   ```bash
+   # This creates a DataFrame with 'name' and 'ase_atoms' columns
+   rye run collect-data /path/to/md/trajectory/ --format extxyz --output structures_to_eval.pckl.gzip
+   ```
 
-4.  **Collect New Labeled Data**: Use `collect-data` again, this time to parse the directory containing your newly finished DFT calculations.
-    ```bash
-    rye run collect-data selected_for_dft/ --format extxyz --ref-energies ref.json --output new_labeled_data.pckl.gzip
-    ```
-5.  **Up-fit and Iterate**: Merge `new_labeled_data.pckl.gzip` with your main training set and re-train (or up-fit) your potential to create the next-generation model. The cycle then repeats.
+2. **Evaluate & Select**: Use `ace-learn` with your current potential to evaluate these structures and select the `N` most uncertain candidates.
+
+   ```bash
+   rye run ace-learn current_potential.yaml structures_to_eval.pckl.gzip --asi current_potential.asi --select 20 --output-selection-dir selected_for_dft
+   ```
+
+   This creates a directory `selected_for_dft/` containing 20 `.xyz` files, ready for calculation.
+
+3. **Perform DFT Calculations**: This is a manual step. Run high-accuracy DFT calculations on the structures inside the `selected_for_dft/` directory. It's recommended to save the results by overwriting the existing `.xyz` files, as `ase.io.write` will embed the new energy and forces.
+
+4. **Collect New Labeled Data**: Use `collect-data` again, this time to parse the directory containing your newly finished DFT calculations.
+
+   ```bash
+   rye run collect-data selected_for_dft/ --format extxyz --ref-energies ref.json --output new_labeled_data.pckl.gzip
+   ```
+
+5. **Up-fit and Iterate**: Merge `new_labeled_data.pckl.gzip` with your main training set and re-train (or up-fit) your potential to create the next-generation model. The cycle then repeats.
 
 
 ### Workflow B: Training Set Analysis — Refining Known Data
@@ -65,14 +72,15 @@ graph TD
 **Goal:** To analyze a model's performance on its own training set to identify high-error structures, or to distill a smaller, core set of "support" structures.
 
 **Conceptual Flow:**
+
 ```mermaid
 graph TD
-    A[Full Training Set<br><i>(training_data.pckl.gzip)</i>] --> B(Train Model);
+    A["Full Training Set<br><i>(training_data.pckl.gzip)</i>"] --> B(Train Model);
     B --> C(model.yaml);
 
     A --> D["ace-learn"];
     C --> D;
-    
+
     D --> E[evaluated_training_set.pckl.gzip];
     E --> F["<b>Analysis Step:</b><br>Filter by error/gamma in a script or notebook"];
     F --> G[Distilled/High-Error Set];
@@ -80,15 +88,86 @@ graph TD
 
 **Step-by-Step Guide:**
 
-1.  **Inputs**: You need your trained potential (`model.yaml`) and the complete, labeled DataFrame (`training_data.pckl.gzip`) that was used to train it.
+1. **Inputs**: You need your trained potential (`model.yaml`) and the complete, labeled DataFrame (`training_data.pckl.gzip`) that was used to train it.
 
-2.  **Perform Self-Evaluation**: Run `ace-learn` on the training set itself. Since the input DataFrame contains `energy` and `forces` columns, the output will automatically include error metrics.
-    ```bash
-    rye run ace-learn model.yaml training_data.pckl.gzip --asi model.asi --output-eval-df evaluated_training_set.pckl.gzip
-    ```
+2. **Perform Self-Evaluation**: Run `ace-learn` on the training set itself. Since the input DataFrame contains `energy` and `forces` columns, the output will automatically include error metrics.
 
-3.  **Analyze and Distill**: Load the resulting `evaluated_training_set.pckl.gzip` into a Python script or Jupyter Notebook. You can now easily sort and filter this DataFrame by `max_gamma`, `energy_error_per_atom`, or `forces_rmse` to:
-    *   Pinpoint structures that the model struggles to describe.
-    *   Select a subset of high-gamma structures that form the "core" of the training set.
+   ```bash
+   rye run ace-learn model.yaml training_data.pckl.gzip --asi model.asi --output-eval-df evaluated_training_set.pckl.gzip
+   ```
+
+3. **Analyze and Distill**: Load the resulting `evaluated_training_set.pckl.gzip` into a Python script or Jupyter Notebook. You can now easily sort and filter this DataFrame by `max_gamma`, `energy_error_per_atom`, or `forces_rmse` to:
+
+   *   Pinpoint structures that the model struggles to describe.
+   *   Select a subset of high-gamma structures that form the "core" of the training set.
 
 ---
+
+## Programmatic API (Advanced Usage)
+
+Beyond the command-line tools, `myace` exposes a high-level Python API for advanced, customized workflows in scripts or Jupyter notebooks.
+
+### Core Functions
+
+You can access the core logic of the command-line tools directly:
+
+- **`myace.build_dataset(...)`**: The engine behind `collect-data`. Parses source files and builds a DataFrame.
+
+  ```python
+  import myace
+  # Build a dataset from a VASP OUTCAR
+  dft_results_df = myace.build_dataset(
+      input_path='./OUTCAR',
+      format='vasp',
+      ref_energies={'Si': -4.5}
+  )
+  ```
+
+- **`myace.evaluate_and_select(...)`**: The engine behind `ace-learn`. Evaluates a DataFrame and optionally selects candidates.
+
+  ```python
+  # Evaluate the dataset and select 20 candidates
+  evaluated_df, selected_df = myace.evaluate_and_select(
+      df=dft_results_df,
+      potential_file='model.yaml',
+      asi_file='model.asi',
+      select_n=20
+  )
+  ```
+
+### I/O Module: `myace.io`
+
+For convenience, common I/O operations are bundled in the `myace.io` module.
+
+- **`myace.io.read(path)`**: Reads a `.pckl.gzip` file into a DataFrame.
+- **`myace.io.write(df, path)`**: Writes a DataFrame to a `.pckl.gzip` file.
+- **`myace.io.export_to_extxyz(df, output_dir)`**: Exports each row of a DataFrame to a separate `.xyz` file in a directory.
+
+### Example: A Custom Scripting Workflow
+
+The API allows for flexible combination of these functions to create powerful custom workflows.
+
+```python
+import myace
+from myace import io
+
+# 1. Load a previously created dataset
+structures_df = io.read('structures_to_eval.pckl.gzip')
+
+# 2. Evaluate and select using the API
+evaluated_df, selected_df = myace.evaluate_and_select(
+    df=structures_df,
+    potential_file='model.yaml',
+    asi_file='model.asi',
+    select_n=10,
+    gamma_threshold=15.0 # Use a custom threshold
+)
+
+# 3. Perform custom filtering on the results
+# Find candidates that are not only uncertain but also have a low ACE energy
+custom_selection = selected_df[selected_df['ace_energy'] < -500]
+
+# 4. Export the final, custom-filtered set for DFT calculations
+print(f"Exporting {len(custom_selection)} custom-selected candidates...")
+io.export_to_extxyz(custom_selection, 'custom_selection_for_dft/')
+```

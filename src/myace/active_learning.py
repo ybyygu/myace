@@ -122,3 +122,56 @@ def select_d_optimal_candidates(
 
     # The function returns a DataFrame with a selection, we can just return it
     return df_selected
+
+
+def evaluate_and_select(
+    df: pd.DataFrame,
+    potential_file: str,
+    asi_file: Optional[str] = None,
+    select_n: int = 0,
+    gamma_threshold: float = 5.0
+) -> tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+    """
+    High-level API to evaluate a DataFrame of configurations and optionally
+    select a high-uncertainty subset.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame with an 'ase_atoms' column.
+        potential_file (str): Path to the ACE potential .yaml file.
+        asi_file (Optional[str], optional): Path to the .asi file for gamma calculations.
+        select_n (int, optional): The number of candidates to select. If 0, no selection is performed.
+        gamma_threshold (float, optional): The gamma value threshold for defining high-uncertainty.
+
+    Returns:
+        tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+            - The DataFrame with all evaluation results.
+            - The DataFrame with only the selected candidates, or None if no selection was performed.
+    """
+    import logging
+
+    calculator = load_ace_calculator(potential_file, asi_file)
+    evaluated_df = evaluate_configs_in_dataframe(df, calculator)
+    
+    selected_df = None
+    if select_n > 0:
+        if not asi_file:
+            raise ValueError("The 'select_n' option requires an 'asi_file' for gamma value calculation.")
+
+        logging.info(f"\nPerforming D-optimal selection for {select_n} candidates...")
+        high_gamma_df = evaluated_df[evaluated_df['max_gamma'] > gamma_threshold].copy()
+
+        if high_gamma_df.empty:
+            logging.warning(f"No structures found above gamma threshold > {gamma_threshold}. No selection performed.")
+            selected_df = pd.DataFrame() # Return empty df
+        elif len(high_gamma_df) < select_n:
+            logging.warning(f"Found only {len(high_gamma_df)} structures above gamma threshold, which is less than the requested {select_n}. Selecting all of them.")
+            selected_df = high_gamma_df
+        else:
+            selected_df = select_d_optimal_candidates(
+                candidate_df=high_gamma_df,
+                potential_file=potential_file,
+                max_to_select=select_n,
+                active_set_file=asi_file
+            )
+            
+    return evaluated_df, selected_df

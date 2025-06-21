@@ -119,3 +119,32 @@ def parse_extxyz_directory(input_path, selection=":") -> list[dict]:
         
     logging.info(f"Successfully parsed {len(parsed_data)} configurations from '{input_path}'.")
     return parsed_data
+
+
+def build_dataset(input_path: str, format: str, selection: str = ":", ref_energies: dict = None) -> pd.DataFrame:
+    """
+    High-level API to build a dataset from a given source.
+
+    This function dispatches to the correct parser based on the format,
+    then builds a standardized DataFrame.
+
+    Args:
+        input_path (str): Path to the source data.
+        format (str): The format of the source data ('vasp' or 'extxyz').
+        selection (str, optional): Slice string to select structures. Defaults to ":".
+        ref_energies (dict, optional): Dictionary of reference energies. Defaults to None.
+
+    Returns:
+        pd.DataFrame: The resulting dataset.
+    """
+    if ref_energies is None:
+        ref_energies = {}
+    
+    if format == 'vasp':
+        parsed_data = parse_vasp_outcar(input_path, selection)
+    elif format == 'extxyz':
+        parsed_data = parse_extxyz_directory(input_path, selection)
+    else:
+        raise ValueError(f"Unsupported format: '{format}'. Supported formats are 'vasp', 'extxyz'.")
+        
+    return build_pacemaker_dataframe(parsed_data, ref_energies)
