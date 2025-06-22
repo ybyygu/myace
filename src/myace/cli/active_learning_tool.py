@@ -75,11 +75,13 @@ def main():
             else:
                 logging.info("No candidates were selected.")
 
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, ValueError, KeyError) as e:
+        # Catch specific, expected errors and report them cleanly.
         logging.error(f"A critical error occurred: {e}")
         sys.exit(1)
     except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
+        # Catch any other unexpected errors.
+        logging.error(f"An unexpected programming error occurred: {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ This project provides a set of standardized tools for collecting and processing 
 
 ## Core Tools
 
-- **`collect-data`**: A general-purpose tool to parse data from various sources (VASP outputs, `extxyz` directories) and build a standardized `pandas.DataFrame`.
+- **`collect-data`**: A general-purpose tool to parse data from various sources (VASP outputs, LAMMPS dumps, `extxyz` directories) and build a standardized `pandas.DataFrame`.
 - **`ace-learn`**: A flexible tool to evaluate a set of structures against a trained ACE potential. It can be used to explore unknown structures or to analyze the performance on known training data.
 
 ---
@@ -44,14 +44,15 @@ graph TD
 1. **Prepare Exploration Set**: Use `collect-data` to parse a large number of unlabeled structures (e.g., from a LAMMPS dump or `.xyz` trajectory) into a standardized DataFrame.
 
    ```bash
-   # This creates a DataFrame with 'name' and 'ase_atoms' columns
-   rye run collect-data /path/to/md/trajectory/ --format extxyz --output structures_to_eval.pckl.gzip
+   # Example for a LAMMPS dump file. Note the crucial use of --lammps-map.
+   # This creates a DataFrame with 'name' and 'ase_atoms' columns.
+   collect-data simulation.dump --format lammps-dump --lammps-map "1:Si,2:O" --output structures_to_eval.pckl.gzip
    ```
 
 2. **Evaluate & Select**: Use `ace-learn` with your current potential to evaluate these structures and select the `N` most uncertain candidates.
 
    ```bash
-   rye run ace-learn current_potential.yaml structures_to_eval.pckl.gzip --asi current_potential.asi --select 20 --output-selection-dir selected_for_dft
+   ace-learn current_potential.yaml structures_to_eval.pckl.gzip --asi current_potential.asi --select 20 --output-selection-dir selected_for_dft
    ```
 
    This creates a directory `selected_for_dft/` containing 20 `.xyz` files, ready for calculation.
@@ -61,7 +62,7 @@ graph TD
 4. **Collect New Labeled Data**: Use `collect-data` again, this time to parse the directory containing your newly finished DFT calculations.
 
    ```bash
-   rye run collect-data selected_for_dft/ --format extxyz --ref-energies ref.json --output new_labeled_data.pckl.gzip
+   collect-data selected_for_dft/ --format extxyz --ref-energies ref.json --output new_labeled_data.pckl.gzip
    ```
 
 5. **Up-fit and Iterate**: Merge `new_labeled_data.pckl.gzip` with your main training set and re-train (or up-fit) your potential to create the next-generation model. The cycle then repeats.
