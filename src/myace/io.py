@@ -8,6 +8,9 @@ from typing import Union
 from pathlib import Path
 import os
 from ase.io import write as ase_write
+import numpy as np
+from ase import Atoms
+
 
 def read(path: Union[str, Path]) -> pd.DataFrame:
     """
@@ -71,3 +74,73 @@ def export_to_extxyz(df: pd.DataFrame, output_dir: Union[str, Path]):
         safe_filename = str(index).replace('#', '_').replace('/', '_')
         filename = output_dir / f"{safe_filename}.xyz"
         ase_write(filename, atoms, format='extxyz')
+
+def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
+    """
+    Reads a parquet file from the 'gosh-adaptor' and converts it into a
+    myace-standard DataFrame.
+
+    The standard format has an 'ase_atoms' column and other metadata,
+    which is different from the input format where structure is spread
+    across columns like 'symbols', 'positions', 'lattice'.
+    
+    This version robustly handles nested numpy arrays with dtype=object
+    by stacking them into clean, multi-dimensional float arrays.
+
+    Args:
+        path (Union[str, Path]): Path to the .parquet file.
+
+    Returns:
+        pd.DataFrame: A myace-standard DataFrame.
+    """
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Input file not found: {path}")
+
+    gosh_df = pd.read_parquet(path)
+
+    required_cols = {'symbols', 'positions', 'lattice', 'energy', 'forces', 'stress'}
+    if not required_cols.issubset(gosh_df.columns):
+        missing = required_cols - set(gosh_df.columns)
+        raise ValueError(f"Input parquet file is missing required columns: {missing}")
+
+    processed_records = []
+    for i, row in gosh_df.iterrows():
+        try:
+            # --- Final, Correct Data Sanitization ---
+            # The data is a numpy array of other numpy arrays (dtype=object).
+            # We use np.vstack to stack them into a single, clean float array.
+            cell = np.vstack(row['lattice'])
+            positions = np.vstack(row['positions'])
+            forces = np.vstack(row['forces'])
+            stress = np.array(row['stress'])
+
+            # Add shape checks for safety
+            if cell.shape != (3, 3):
+                raise ValueError(f"Stacked cell has shape {cell.shape}, expected (3, 3).")
+            if len(positions.shape) != 2 or positions.shape[1] != 3:
+                raise ValueError(f"Stacked positions has shape {positions.shape}, expected (N, 3).")
+
+            # Construct the Atoms object with clean data
+            atoms = Atoms(
+                symbols=row['symbols'],
+                positions=positions,
+                cell=cell,
+                pbc=True
+            )
+            
+            # Create the record in the myace-standard format
+            record = {
+                'name': f"{Path(path).stem}##{i}",
+                'ase_atoms': atoms,
+                'energy': row['energy'],
+                'forces': forces,
+                'stress': stress
+            }
+            processed_records.append(record)
+        except Exception as e:
+            raise ValueError(f"Failed to process data at index {i} in file {path}. Original error: {e}") from e
+
+    # Create the final DataFrame
+    final_df = pd.DataFrame(processed_records)
+    
+    return final_df
