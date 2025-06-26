@@ -10,6 +10,7 @@ import os
 from ase.io import write as ase_write
 import numpy as np
 from ase import Atoms
+import logging
 
 
 def read(path: Union[str, Path]) -> pd.DataFrame:
@@ -144,3 +145,26 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
     final_df = pd.DataFrame(processed_records)
     
     return final_df
+
+def export_to_vasp(df: pd.DataFrame, output_dir: Union[str, Path]):
+    """
+    Writes each structure from a DataFrame into a separate .vasp file (POSCAR format),
+    named after the DataFrame's index.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing an 'ase_atoms' column.
+        output_dir (Union[str, Path]): Directory where all .vasp files will be saved.
+    """
+    if 'ase_atoms' not in df.columns:
+        raise ValueError("Input DataFrame must contain an 'ase_atoms' column.")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logging.info(f"All .vasp files will be saved in: '{output_dir}'")
+
+    for index, row in df.iterrows():
+        atoms = row['ase_atoms']
+        file_path = output_dir / f"{index}.vasp"
+        ase_write(file_path, atoms, format='vasp', sort=False)
+            
+    logging.info(f"Process complete. {len(df)} structures written to individual .vasp files in '{output_dir}'.")
