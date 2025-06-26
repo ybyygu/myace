@@ -15,25 +15,14 @@ from pyace import PyACECalculator, BBasisConfiguration
 from pyace.aceselect import select_structures_maxvol
 from pyace.activelearning import load_active_inverse_set, compute_A_active_inverse
 
+# --- Local Project Imports ---
+from .io import load_ace_calculator
+
 # Configure logging if not already configured by a higher-level script
 # This is a basic configuration.
 if not logging.getLogger().hasHandlers():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
 
-def load_ace_calculator(potential_file: str, active_set_file: Optional[str]) -> PyACECalculator:
-    """Loads an ACE calculator, optionally with an active set for gamma calculation."""
-    if not os.path.exists(potential_file):
-        raise FileNotFoundError(f"Potential file not found at {potential_file}.")
-    
-    calc = PyACECalculator(potential_file)
-    
-    if active_set_file:
-        if os.path.exists(active_set_file):
-            calc.set_active_set(active_set_file)
-        else:
-            logging.warning(f"Active set file {active_set_file} not found. Gamma values will not be computed.")
-            
-    return calc
 
 def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd.DataFrame:
     """

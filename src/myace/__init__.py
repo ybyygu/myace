@@ -8,10 +8,12 @@ from .active_learning import evaluate_and_select
 
 # Import the I/O module under its own namespace
 from . import io
+from . import utils
 
 # Define what gets imported with 'from myace import *'
 __all__ = [
     'build_dataset',
     'evaluate_and_select',
+    'utils',
     'io'
 ]

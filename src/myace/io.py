@@ -4,13 +4,14 @@ Convenience functions for reading and writing pandas DataFrames
 in the compressed pickle format used by myace tools.
 """
 import pandas as pd
-from typing import Union
+from typing import Union, Optional
 from pathlib import Path
 import os
 from ase.io import write as ase_write
 import numpy as np
 from ase import Atoms
 import logging
+from pyace import PyACECalculator
 
 
 def read(path: Union[str, Path]) -> pd.DataFrame:
@@ -46,7 +47,7 @@ def export_to_extxyz(df: pd.DataFrame, output_dir: Union[str, Path]):
 
     for index, row in df.iterrows():
         atoms = row['ase_atoms'].copy()
-        
+
         # Definitive fix for 'NoneType' errors: Sanitize both the .info and
         # .arrays dictionaries of the Atoms object before writing. This removes
         # any keys that have a None value, which ASE's writer cannot handle.
@@ -84,7 +85,7 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
     The standard format has an 'ase_atoms' column and other metadata,
     which is different from the input format where structure is spread
     across columns like 'symbols', 'positions', 'lattice'.
-    
+
     This version robustly handles nested numpy arrays with dtype=object
     by stacking them into clean, multi-dimensional float arrays.
 
@@ -128,12 +129,14 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
                 cell=cell,
                 pbc=True
             )
-            
+
             # Create the record in the myace-standard format
             record = {
                 'name': f"{Path(path).stem}##{i}",
                 'ase_atoms': atoms,
                 'energy': row['energy'],
+                'energy_corrected': row['energy'],
+                'energy_corrected_per_atom': row['energy'] / len(atoms),
                 'forces': forces,
                 'stress': stress
             }
@@ -143,7 +146,7 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
 
     # Create the final DataFrame
     final_df = pd.DataFrame(processed_records)
-    
+
     return final_df
 
 def export_to_vasp(df: pd.DataFrame, output_dir: Union[str, Path]):
@@ -166,5 +169,36 @@ def export_to_vasp(df: pd.DataFrame, output_dir: Union[str, Path]):
         atoms = row['ase_atoms']
         file_path = output_dir / f"{index}.vasp"
         ase_write(file_path, atoms, format='vasp', sort=False)
-            
+
     logging.info(f"Process complete. {len(df)} structures written to individual .vasp files in '{output_dir}'.")
+
+def load_ace_calculator(potential_file: str, active_set_file: Optional[str] = None) -> "PyACECalculator":
+    """
+    Loads an ACE calculator from a .yaml file, serving as a convenient wrapper
+    for use in general ASE workflows. Optionally attaches an active set for
+    gamma value calculation.
+
+    Args:
+        potential_file (str): Path to the .yaml potential file.
+        active_set_file (Optional[str], optional): Path to the .asi active set file.
+                                                   If provided, enables gamma value calculations.
+                                                   Defaults to None.
+
+    Returns:
+        PyACECalculator: An instantiated ASE-compatible calculator.
+
+    Raises:
+        FileNotFoundError: If the specified potential file does not exist.
+    """
+    if not os.path.exists(potential_file):
+        raise FileNotFoundError(f"Potential file not found at {potential_file}.")
+
+    calc = PyACECalculator(potential_file)
+
+    if active_set_file:
+        if os.path.exists(active_set_file):
+            calc.set_active_set(active_set_file)
+        else:
+            logging.warning(f"Active set file {active_set_file} not found. Gamma values will not be computed.")
+
+    return calc

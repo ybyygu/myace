@@ -8,3 +8,5 @@ wheels/
 
 # venv
 .venv
+README.org
+MEMO.md
