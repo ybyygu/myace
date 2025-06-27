@@ -10,6 +10,7 @@ import os
 from ase.io import write as ase_write
 import numpy as np
 from ase import Atoms
+from collections import Counter
 import logging
 from pyace import PyACECalculator
 
@@ -77,10 +78,11 @@ def export_to_extxyz(df: pd.DataFrame, output_dir: Union[str, Path]):
         filename = output_dir / f"{safe_filename}.xyz"
         ase_write(filename, atoms, format='extxyz')
 
-def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
+def read_gosh_parquet(path: Union[str, Path], ref_energies: Optional[dict] = None) -> pd.DataFrame:
     """
     Reads a parquet file from the 'gosh-adaptor' and converts it into a
-    myace-standard DataFrame.
+    myace-standard DataFrame. Optionally calculates corrected energies if
+    reference energies are provided.
 
     The standard format has an 'ase_atoms' column and other metadata,
     which is different from the input format where structure is spread
@@ -91,6 +93,9 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
 
     Args:
         path (Union[str, Path]): Path to the .parquet file.
+        ref_energies (Optional[dict], optional): Dictionary of reference energies
+                                                 per element for energy correction.
+                                                 Defaults to None.
 
     Returns:
         pd.DataFrame: A myace-standard DataFrame.
@@ -108,9 +113,6 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
     processed_records = []
     for i, row in gosh_df.iterrows():
         try:
-            # --- Final, Correct Data Sanitization ---
-            # The data is a numpy array of other numpy arrays (dtype=object).
-            # We use np.vstack to stack them into a single, clean float array.
             cell = np.vstack(row['lattice'])
             positions = np.vstack(row['positions'])
             forces = np.vstack(row['forces'])
@@ -122,21 +124,17 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
             if len(positions.shape) != 2 or positions.shape[1] != 3:
                 raise ValueError(f"Stacked positions has shape {positions.shape}, expected (N, 3).")
 
-            # Construct the Atoms object with clean data
             atoms = Atoms(
                 symbols=row['symbols'],
                 positions=positions,
                 cell=cell,
                 pbc=True
             )
-
-            # Create the record in the myace-standard format
+            
             record = {
                 'name': f"{Path(path).stem}##{i}",
                 'ase_atoms': atoms,
                 'energy': row['energy'],
-                'energy_corrected': row['energy'],
-                'energy_corrected_per_atom': row['energy'] / len(atoms),
                 'forces': forces,
                 'stress': stress
             }
@@ -144,9 +142,19 @@ def read_gosh_parquet(path: Union[str, Path]) -> pd.DataFrame:
         except Exception as e:
             raise ValueError(f"Failed to process data at index {i} in file {path}. Original error: {e}") from e
 
-    # Create the final DataFrame
     final_df = pd.DataFrame(processed_records)
 
+    # If reference energies are provided, calculate corrected energies
+    if ref_energies is not None:
+        logging.info("Reference energies provided. Calculating corrected energies.")
+        
+        def calculate_atomic_ref_energy(atoms_obj):
+            counts = Counter(atoms_obj.get_chemical_symbols())
+            return sum(counts[el] * ref_energies.get(el, 0) for el in counts)
+            
+        final_df['energy_corrected'] = final_df['energy'] - final_df['ase_atoms'].apply(calculate_atomic_ref_energy)
+        final_df['energy_corrected_per_atom'] = final_df['energy_corrected'] / final_df['ase_atoms'].apply(len)
+    
     return final_df
 
 def export_to_vasp(df: pd.DataFrame, output_dir: Union[str, Path]):
@@ -186,7 +194,7 @@ def load_ace_calculator(potential_file: str, active_set_file: Optional[str] = No
 
     Returns:
         PyACECalculator: An instantiated ASE-compatible calculator.
-
+        
     Raises:
         FileNotFoundError: If the specified potential file does not exist.
     """
@@ -194,11 +202,11 @@ def load_ace_calculator(potential_file: str, active_set_file: Optional[str] = No
         raise FileNotFoundError(f"Potential file not found at {potential_file}.")
 
     calc = PyACECalculator(potential_file)
-
+    
     if active_set_file:
         if os.path.exists(active_set_file):
             calc.set_active_set(active_set_file)
         else:
             logging.warning(f"Active set file {active_set_file} not found. Gamma values will not be computed.")
-
+            
     return calc

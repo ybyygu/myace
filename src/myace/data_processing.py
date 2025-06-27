@@ -23,19 +23,8 @@ def build_pacemaker_dataframe(parsed_data_list, ref_energies):
 
     df = pd.DataFrame(parsed_data_list)
     
-    # This core energy correction logic is now also available via add_corrected_energies
-    if 'energy' in df.columns and not df['energy'].isnull().all():
-        # Ensure ref_energies is a dictionary, defaulting to empty if None
-        current_ref_energies = ref_energies if isinstance(ref_energies, dict) else {}
-
-        def calculate_atomic_ref_energy(atoms_obj):
-            if not hasattr(atoms_obj, 'get_chemical_symbols'):
-                return 0
-            counts = Counter(atoms_obj.get_chemical_symbols())
-            return sum(counts[el] * current_ref_energies.get(el, 0) for el in counts)
-            
-        df['energy_corrected'] = df['energy'] - df['ase_atoms'].apply(calculate_atomic_ref_energy)
-        df['energy_corrected_per_atom'] = df['energy_corrected'] / df['ase_atoms'].apply(len)
+    # Delegate energy correction to the single source of truth function
+    df = add_corrected_energies(df, ref_energies)
 
     final_columns = ['name', 'ase_atoms']
     optional_cols = ['energy', 'forces', 'stress', 'energy_corrected', 'energy_corrected_per_atom']
@@ -48,69 +37,33 @@ def build_pacemaker_dataframe(parsed_data_list, ref_energies):
 
 def add_corrected_energies(df: pd.DataFrame, ref_energies: dict) -> pd.DataFrame:
     """
-    Adds 'energy_corrected' and 'energy_corrected_per_atom' columns to a DataFrame
-    if 'energy' and 'ase_atoms' columns are present and valid. This is useful for
-    DataFrames read directly (e.g., via myace.io.read_gosh_parquet) that need
-    energy correction before use with pacemaker or other analysis.
+    Adds 'energy_corrected' and 'energy_corrected_per_atom' columns to a DataFrame.
+
+    This is a streamlined version that expects a DataFrame with a valid 'ase_atoms'
+    column. It will add corrected energies if an 'energy' column is present.
+    It follows a fast-fail philosophy for incorrect inputs.
 
     Args:
-        df (pd.DataFrame): Input DataFrame, must contain 'ase_atoms' and 'energy'.
-        ref_energies (dict): Dictionary of reference energies per element. 
-                             Example: {'Si': -100.0, 'O': -50.0}
+        df (pd.DataFrame): Input DataFrame.
+        ref_energies (dict): Dictionary of reference energies per element.
 
     Returns:
-        pd.DataFrame: DataFrame with added energy_corrected columns, or a copy of 
-                      the original if prerequisites are not met or an error occurs.
+        pd.DataFrame: A new DataFrame with added energy_corrected columns if applicable.
     """
-    if not isinstance(df, pd.DataFrame):
-        logging.error("Input 'df' is not a pandas DataFrame. Cannot calculate corrected energies.")
-        return df # Or raise TypeError
+    if 'energy' not in df.columns or df['energy'].isnull().all():
+        # If there's no energy data, there's nothing to correct.
+        return df
 
-    df_copy = df.copy() # Work on a copy
-
-    if 'energy' not in df_copy.columns or 'ase_atoms' not in df_copy.columns:
-        logging.warning("DataFrame is missing 'energy' or 'ase_atoms' column. Cannot calculate corrected energies.")
-        return df_copy
-
-    if df_copy['energy'].isnull().all():
-        logging.warning("'energy' column contains all NaN or None values. Cannot calculate corrected energies.")
-        return df_copy
-
-    if not isinstance(ref_energies, dict):
-        logging.error("'ref_energies' must be a dictionary. Cannot calculate corrected energies.")
-        return df_copy
+    df_copy = df.copy()
 
     def calculate_atomic_ref_energy(atoms_obj):
-        # Ensure atoms_obj is an ASE Atoms object or has get_chemical_symbols
-        if not isinstance(atoms_obj, Atoms) or not hasattr(atoms_obj, 'get_chemical_symbols'):
-            logging.warning(f"Item in 'ase_atoms' is not a valid ASE Atoms object. Skipping energy correction for this row.")
-            return np.nan # Return NaN so this row's corrected energy becomes NaN
-        
         counts = Counter(atoms_obj.get_chemical_symbols())
-        current_ref_val = 0
-        for el, count in counts.items():
-            if el not in ref_energies:
-                logging.warning(f"Element '{el}' not found in provided ref_energies. Treating its reference energy as 0 for this row.")
-            current_ref_val += count * ref_energies.get(el, 0)
-        return current_ref_val
-
-    try:
-        ref_energy_values = df_copy['ase_atoms'].apply(calculate_atomic_ref_energy)
+        return sum(counts[el] * ref_energies.get(el, 0) for el in counts)
         
-        # Ensure 'energy' column is numeric, coercing errors to NaN
-        energies_numeric = pd.to_numeric(df_copy['energy'], errors='coerce')
-        
-        df_copy['energy_corrected'] = energies_numeric - ref_energy_values
-        
-        atom_counts = df_copy['ase_atoms'].apply(lambda x: len(x) if isinstance(x, Atoms) and hasattr(x, '__len__') else 0)
-        # Avoid division by zero by replacing 0 counts with NaN for division
-        df_copy['energy_corrected_per_atom'] = df_copy['energy_corrected'].divide(atom_counts.replace(0, np.nan))
-
-    except Exception as e:
-        logging.error(f"An error occurred during energy correction calculation: {e}", exc_info=True)
-        # Return the original df's copy if a major error occurs, it might not have the new columns or they might be partial/NaN
-        return df.copy() 
-        
+    ref_energy_values = df_copy['ase_atoms'].apply(calculate_atomic_ref_energy)
+    df_copy['energy_corrected'] = df_copy['energy'] - ref_energy_values
+    df_copy['energy_corrected_per_atom'] = df_copy['energy_corrected'] / df_copy['ase_atoms'].apply(len)
+    
     return df_copy
 
 
