@@ -187,19 +187,31 @@ For convenience, common I/O operations are bundled in the `myace.io` module.
 
 This module holds general-purpose helper functions for analysis.
 
-- **`myace.utils.calculate_max_force_component(atoms)`**: A function to calculate the maximum absolute force component. This is particularly useful for checking if a structure has reached the force convergence criteria for a geometry optimization.
+- **`myace.utils.get_max_force_component(forces)`**: Calculates the maximum absolute force component from a NumPy array of forces.
+- **`myace.utils.get_max_force_norm(forces)`**: Calculates the maximum force vector norm from a NumPy array of forces.
+- **`myace.utils.sample_by_energy(...)`**: Performs energy-weighted random sampling to select a diverse subset from a larger dataset, prioritizing high-energy structures.
 
-  **Example: Find structures that are not fully relaxed**
+  **Example: Subsampling a trajectory to reduce redundancy**
   ```python
-  from myace.io import read
-  from myace.utils import get_max_force_component
-  
-  # Load a dataset containing final structures from DFT calculations
-  dft_results_df = read('dft_results.pckl.gzip')
-  
-  # Calculate the max force component for each structure
-  dft_results_df['max_force_comp'] = dft_results_df['forces'].apply(get_max_force_component)
-  
+  from myace import io
+  from myace import utils
+
+  # Load a dataset collected from a long trajectory, which may have many similar structures
+  full_trajectory_df = io.read('full_trajectory.pckl.gzip')
+
+  # Sample 40% of the structures using energy-weighting to get a more diverse set
+  # This favors higher-energy (often more unique) structures over repeated low-energy ones.
+  diverse_subset_df = utils.sample_by_energy(
+      full_trajectory_df,
+      frac=0.4,
+      energy_col='energy_corrected_per_atom', # Use per-atom corrected energy for weighting
+      energy_scale=0.1,  # Smaller value = stronger bias towards high energy
+      random_state=42    # For reproducible results
+  )
+
+  print(f"Original dataset size: {len(full_trajectory_df)}")
+  print(f"Sampled dataset size: {len(diverse_subset_df)}")
+  io.write(diverse_subset_df, 'diverse_subset.pckl.gzip')
   ```
 
 ### Example: A Custom Scripting Workflow
@@ -227,3 +239,8 @@ forces = atoms.get_forces()
 
 print(f"Total Energy: {energy:.4f} eV")
 print(f"Forces on atom 0: {forces}")
+```
+
+> **Important Note on `get_potential_energy()`**
+>
+> When using an ACE calculator loaded via `myace`, please be aware that `atoms.get_potential_energy()` returns the value predicted by the ACE model. If your potential was trained on data where reference atomic energies were subtracted (i.e., on `energy_corrected` or binding energies), this method will correctly return a **binding energy**, not an absolute total energy. This is the expected behavior, as the calculator reproduces the quantities it was trained to predict.

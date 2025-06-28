@@ -68,14 +68,13 @@ def main():
 
         logging.info("--- Evaluation Summary ---")
         # Define the base columns for display in order
+        # We explicitly exclude ace_energy and max_ace_force_norm to avoid confusion
         desired_display_cols = [
             "name",
             # max_gamma will be inserted here conditionally
             "dft_energy",
-            "ace_energy",
             "total_energy_error",
             "max_dft_force_norm",
-            "max_ace_force_norm",
             "max_delta_force_norm"
         ]
 

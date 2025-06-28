@@ -31,16 +31,15 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
     This function adds several evaluation columns, including:
     - `ace_energy`, `ace_forces` (raw ACE outputs)
     - `max_gamma` (if an active set is loaded in the calculator)
-    - `dft_energy` (original energy from input DataFrame, if present)
-    - `total_energy_error` (ace_energy - dft_energy)
-    - `max_dft_force_norm` (max norm of per-atom DFT forces from input)
-    - `max_ace_force_norm` (max norm of per-atom ACE forces)
-    - `max_delta_force_norm` (max norm of per-atom force differences: ACE - DFT)
-    - It also retains `energy_error_per_atom` and `forces_rmse` for programmatic use.
+    - `total_energy_error` (ace_energy - dft_corrected_energy)
+    - It correctly compares against 'energy_corrected' if available, otherwise
+      it falls back to comparing against 'energy'.
+    - Force norms and other metrics are also calculated.
 
     Args:
         df (pd.DataFrame): DataFrame containing an 'ase_atoms' column with ASE Atoms objects.
-                           May also contain 'energy' and 'forces' columns for DFT reference.
+                           Should also contain 'energy' and 'forces', and ideally
+                           'energy_corrected' for accurate error assessment.
         calc (PyACECalculator): The ACE calculator to use for evaluation.
 
     Returns:
@@ -58,17 +57,18 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
         # Core ACE calculations
         res['ace_energy'] = atoms.get_potential_energy()
         ace_forces_raw = atoms.get_forces() 
-        res['ace_forces'] = ace_forces_raw # Store raw ACE forces
+        res['ace_forces'] = ace_forces_raw
 
         gamma_values = calc.results.get("gamma")
         res['max_gamma'] = np.max(gamma_values) if gamma_values is not None and gamma_values.size > 0 else np.nan
 
         # DFT reference data
         dft_energy = row.get('energy')
-        dft_forces_raw = row.get('forces') # Get raw DFT forces from input row
-        res['dft_energy'] = dft_energy
+        dft_corrected_energy = row.get('energy_corrected')
+        dft_forces_raw = row.get('forces')
+        res['dft_energy'] = dft_energy # Keep original total energy for reporting
 
-        # --- Simplified Force Metric Calculations ---
+        # --- Corrected Error and Force Metric Calculations ---
 
         # Max norm of DFT forces
         res['max_dft_force_norm'] = np.nan
@@ -90,10 +90,14 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
             except Exception as e:
                 logging.debug(f"Row {index}: Could not calculate max_ace_force_norm. Error: {e}")
 
+        # Choose the correct DFT energy for comparison (corrected vs. total)
+        # Prioritize 'energy_corrected' as it's the quantity the potential was trained on.
+        energy_to_compare = dft_corrected_energy if dft_corrected_energy is not None else dft_energy
+        
         # Total energy error
         res['total_energy_error'] = np.nan
-        if dft_energy is not None and res['ace_energy'] is not None:
-            res['total_energy_error'] = res['ace_energy'] - dft_energy
+        if energy_to_compare is not None and res['ace_energy'] is not None:
+            res['total_energy_error'] = res['ace_energy'] - energy_to_compare
         
         # Max norm of (ACE forces - DFT forces)
         res['max_delta_force_norm'] = np.nan
@@ -109,8 +113,8 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
         # Original error metrics (retained for programmatic API compatibility)
         res['energy_error_per_atom'] = np.nan
         num_atoms = len(atoms)
-        if dft_energy is not None and res['ace_energy'] is not None and num_atoms > 0:
-            res['energy_error_per_atom'] = (res['ace_energy'] - dft_energy) / num_atoms
+        if energy_to_compare is not None and res['ace_energy'] is not None and num_atoms > 0:
+            res['energy_error_per_atom'] = (res['ace_energy'] - energy_to_compare) / num_atoms
         
         res['forces_rmse'] = np.nan
         if dft_forces_raw is not None and ace_forces_raw is not None and getattr(dft_forces_raw, 'shape', None) == getattr(ace_forces_raw, 'shape', None):
