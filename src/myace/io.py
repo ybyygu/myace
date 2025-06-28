@@ -4,7 +4,7 @@ Convenience functions for reading and writing pandas DataFrames
 in the compressed pickle format used by myace tools.
 """
 import pandas as pd
-from typing import Union, Optional
+from typing import Union, Optional, List
 from pathlib import Path
 import os
 from ase.io import write as ase_write
@@ -13,6 +13,9 @@ from ase import Atoms
 from collections import Counter
 import logging
 from pyace import PyACECalculator
+from tqdm.auto import tqdm
+
+from .utils import sample_by_energy
 
 
 def read(path: Union[str, Path]) -> pd.DataFrame:
@@ -210,3 +213,57 @@ def load_ace_calculator(potential_file: str, active_set_file: Optional[str] = No
             logging.warning(f"Active set file {active_set_file} not found. Gamma values will not be computed.")
             
     return calc
+
+def get_dataset_from_gosh_parquet_files(
+    file_paths: List[Union[str, Path]],
+    frac: float,
+    ref_energies: Optional[dict] = None,
+    energy_col: str = 'energy',
+    energy_scale: float = 0.1,
+    random_state: Optional[int] = None
+) -> pd.DataFrame:
+    """
+    Builds a final, merged dataset by sampling from a list of parquet files.
+
+    This function automates the workflow:
+    1. Iterates through a list of .parquet files.
+    2. For each file, calls `read_gosh_parquet` to load and correct energies.
+    3. For each resulting DataFrame, calls `utils.sample_by_energy` to sample.
+    4. Concatenates all sampled DataFrames into a single one.
+
+    Args:
+        file_paths (List[Union[str, Path]]): A list of paths to .parquet files.
+        frac (float): The fraction of structures to sample from each file.
+        ref_energies (Optional[dict], optional): Reference energies for correction.
+        energy_col (str, optional): The energy column to use for weighting.
+        energy_scale (float, optional): The energy scale for weighting.
+        random_state (Optional[int], optional): Seed for reproducible sampling.
+
+    Returns:
+        pd.DataFrame: The final, merged, and sampled dataset. Returns an empty
+                      DataFrame if no files are successfully processed.
+    """
+    all_sampled_dfs = []
+    for file_path in tqdm(file_paths, desc="Processing and Sampling Files"):
+        try:
+            full_df = read_gosh_parquet(file_path, ref_energies=ref_energies)
+            
+            sampling_energy_col = 'energy_corrected_per_atom' if ref_energies and 'energy_corrected_per_atom' in full_df.columns else energy_col
+
+            sampled_df = sample_by_energy(
+                full_df,
+                frac=frac,
+                energy_col=sampling_energy_col,
+                energy_scale=energy_scale,
+                random_state=random_state
+            )
+            all_sampled_dfs.append(sampled_df)
+        except Exception as e:
+            logging.warning(f"Skipping file {file_path} due to an error: {e}")
+
+    if not all_sampled_dfs:
+        logging.warning("No data was successfully processed and sampled.")
+        return pd.DataFrame()
+
+    final_df = pd.concat(all_sampled_dfs, ignore_index=True)
+    return final_df

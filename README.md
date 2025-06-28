@@ -22,7 +22,7 @@ This toolkit is designed to support two primary workflows common in potential de
 ```mermaid
 graph TD
     subgraph "Phase 1: Explore & Select"
-        A["MD Trajectory<br><i>(many unlabeled structures)</i>"] -->|`collect-data --format extxyz`| B(structures_to_eval.pckl.gzip);
+        A["MD Trajectory<br><i>(many unlabeled structures)</i>"] -->|collect-data| B(structures_to_eval.pckl.gzip);
         C[current_model.yaml] --> D["ace-learn --select N"];
         B --> D;
         D --> E[selected_for_dft/];
@@ -94,7 +94,7 @@ graph TD
 2. **Perform Self-Evaluation**: Run `ace-learn` on the training set itself. Since the input DataFrame contains `energy` and `forces` columns, the output will automatically include error metrics.
 
    ```bash
-   rye run ace-learn model.yaml training_data.pckl.gzip --asi model.asi --output-eval-df evaluated_training_set.pckl.gzip
+   ace-learn model.yaml training_data.pckl.gzip --asi model.asi --output-eval-df evaluated_training_set.pckl.gzip
    ```
 
 3. **Analyze and Distill**: Load the resulting `evaluated_training_set.pckl.gzip` into a Python script or Jupyter Notebook. You can now easily sort and filter this DataFrame by `max_gamma`, `energy_error_per_atom`, or `forces_rmse` to:
@@ -152,35 +152,24 @@ For convenience, common I/O operations are bundled in the `myace.io` module.
   1.  First, use `gosh-adaptor` to process your raw simulation output. For instance, to parse a VASP OUTCAR:
       ```bash
       # On your command line (assuming gosh-adaptor is installed)
-      gosh-adaptor vasp OUTCAR --output outcar_data.parquet
+      # collect all DFT entries available in OUTCAR
+      gosh-adaptor -v vasp collect OUTCAR --output outcar_data.parquet
+      # or, collect all OUTCAR files into one parquet dataframe file
+      fd OUTCAR | sort -n | gosh-adaptor -v vasp collect -o collected-vasp-results.parquet
       ```
-
+      
   2.  Then, in your Python script, use `myace.io.read_gosh_parquet` to directly create a `pacemaker`-ready DataFrame:
       ```python
       from myace import io
-
+      
       parquet_file_path = "outcar_data.parquet"
       # Define your elemental reference energies (replace with actual values)
-      elemental_reference_energies = {
-          "Si": -4.500,
-          "O": -75.023
-      }
-
-      try:
-          # Read parquet and apply energy correction in one step
-          pacemaker_ready_df = io.read_gosh_parquet(
-              parquet_file_path,
-              ref_energies=elemental_reference_energies
-          )
+      ref_energies={'Fe':-8.455262, "C":-9.224056}
           
-          print(f"Successfully created pacemaker-ready DataFrame with {len(pacemaker_ready_df)} configurations.")
-          print("\nDataFrame Info:")
-          pacemaker_ready_df.info()
-
-      except FileNotFoundError:
-          print(f"Error: Parquet file '{parquet_file_path}' not found.")
-      except Exception as e:
-          print(f"An error occurred: {e}")
+      # Read parquet and apply energy correction in one step
+      pacemaker_ready_df = io.read_gosh_parquet(parquet_file_path, ref_energies=ref_energies)
+      # Show dataset information
+      pacemaker_ready_df.info()
       ```
 
 ### Utility Functions (`myace.utils`)
@@ -188,17 +177,23 @@ For convenience, common I/O operations are bundled in the `myace.io` module.
 This module holds general-purpose helper functions for analysis.
 
 - **`myace.utils.get_max_force_component(forces)`**: Calculates the maximum absolute force component from a NumPy array of forces.
+
 - **`myace.utils.get_max_force_norm(forces)`**: Calculates the maximum force vector norm from a NumPy array of forces.
+
 - **`myace.utils.sample_by_energy(...)`**: Performs energy-weighted random sampling to select a diverse subset from a larger dataset, prioritizing high-energy structures.
 
   **Example: Subsampling a trajectory to reduce redundancy**
+
   ```python
   from myace import io
   from myace import utils
-
+  
   # Load a dataset collected from a long trajectory, which may have many similar structures
   full_trajectory_df = io.read('full_trajectory.pckl.gzip')
-
+  
+  # Show force errors
+  full_trajector_df.forces.apply(utils.get_max_force_norm)
+  
   # Sample 40% of the structures using energy-weighting to get a more diverse set
   # This favors higher-energy (often more unique) structures over repeated low-energy ones.
   diverse_subset_df = utils.sample_by_energy(
@@ -208,7 +203,7 @@ This module holds general-purpose helper functions for analysis.
       energy_scale=0.1,  # Smaller value = stronger bias towards high energy
       random_state=42    # For reproducible results
   )
-
+  
   print(f"Original dataset size: {len(full_trajectory_df)}")
   print(f"Sampled dataset size: {len(diverse_subset_df)}")
   io.write(diverse_subset_df, 'diverse_subset.pckl.gzip')

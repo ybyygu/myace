@@ -28,28 +28,37 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
     """
     Evaluates all configurations in a DataFrame using the given ACE calculator.
 
-    This function adds several evaluation columns, including:
-    - `ace_energy`, `ace_forces` (raw ACE outputs)
-    - `max_gamma` (if an active set is loaded in the calculator)
-    - `total_energy_error` (ace_energy - dft_corrected_energy)
-    - It correctly compares against 'energy_corrected' if available, otherwise
-      it falls back to comparing against 'energy'.
-    - Force norms and other metrics are also calculated.
+    This function adds several evaluation columns. If these columns already
+    exist in the input DataFrame, they are dropped and re-calculated.
 
     Args:
-        df (pd.DataFrame): DataFrame containing an 'ase_atoms' column with ASE Atoms objects.
-                           Should also contain 'energy' and 'forces', and ideally
-                           'energy_corrected' for accurate error assessment.
+        df (pd.DataFrame): DataFrame containing an 'ase_atoms' column.
         calc (PyACECalculator): The ACE calculator to use for evaluation.
 
     Returns:
-        pd.DataFrame: The input DataFrame with added evaluation columns.
+        pd.DataFrame: The DataFrame with added/updated evaluation columns.
     """
     if 'ase_atoms' not in df.columns:
         raise ValueError("Input DataFrame must contain an 'ase_atoms' column.")
 
+    # --- BUG FIX: Drop existing evaluation columns to prevent duplication ---
+    eval_cols_to_be_generated = [
+        'ace_energy', 'ace_forces', 'max_gamma', 'dft_energy', 
+        'max_dft_force_norm', 'max_ace_force_norm', 'total_energy_error',
+        'max_delta_force_norm', 'energy_error_per_atom', 'forces_rmse'
+    ]
+    
+    existing_cols = [col for col in eval_cols_to_be_generated if col in df.columns]
+    
+    df_clean = df
+    if existing_cols:
+        logging.info(f"Input data already contains evaluation columns: {existing_cols}. They will be dropped and re-calculated.")
+        df_clean = df.drop(columns=existing_cols)
+    # --------------------------------------------------------------------
+
     results = []
-    for index, row in tqdm(df.iterrows(), total=len(df), desc="Evaluating Configurations"):
+    # Use the cleaned DataFrame for iteration
+    for index, row in tqdm(df_clean.iterrows(), total=len(df_clean), desc="Evaluating Configurations"):
         atoms = row['ase_atoms'].copy()
         atoms.calc = calc
 
@@ -66,11 +75,10 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
         dft_energy = row.get('energy')
         dft_corrected_energy = row.get('energy_corrected')
         dft_forces_raw = row.get('forces')
-        res['dft_energy'] = dft_energy # Keep original total energy for reporting
+        res['dft_energy'] = dft_energy
 
         # --- Corrected Error and Force Metric Calculations ---
 
-        # Max norm of DFT forces
         res['max_dft_force_norm'] = np.nan
         if dft_forces_raw is not None:
             try:
@@ -80,7 +88,6 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
             except Exception as e:
                 logging.debug(f"Row {index}: Could not calculate max_dft_force_norm. Error: {e}")
         
-        # Max norm of ACE forces
         res['max_ace_force_norm'] = np.nan
         if ace_forces_raw is not None:
             try:
@@ -90,16 +97,12 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
             except Exception as e:
                 logging.debug(f"Row {index}: Could not calculate max_ace_force_norm. Error: {e}")
 
-        # Choose the correct DFT energy for comparison (corrected vs. total)
-        # Prioritize 'energy_corrected' as it's the quantity the potential was trained on.
         energy_to_compare = dft_corrected_energy if dft_corrected_energy is not None else dft_energy
         
-        # Total energy error
         res['total_energy_error'] = np.nan
         if energy_to_compare is not None and res['ace_energy'] is not None:
             res['total_energy_error'] = res['ace_energy'] - energy_to_compare
         
-        # Max norm of (ACE forces - DFT forces)
         res['max_delta_force_norm'] = np.nan
         if dft_forces_raw is not None and ace_forces_raw is not None and getattr(dft_forces_raw, 'shape', None) == getattr(ace_forces_raw, 'shape', None):
             try:
@@ -110,7 +113,6 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
             except Exception as e:
                 logging.debug(f"Row {index}: Could not calculate max_delta_force_norm. Error: {e}")
         
-        # Original error metrics (retained for programmatic API compatibility)
         res['energy_error_per_atom'] = np.nan
         num_atoms = len(atoms)
         if energy_to_compare is not None and res['ace_energy'] is not None and num_atoms > 0:
@@ -125,9 +127,9 @@ def evaluate_configs_in_dataframe(df: pd.DataFrame, calc: PyACECalculator) -> pd
             
         results.append(res)
     
-    # Append results as new columns to the original DataFrame
-    eval_df = pd.DataFrame(results, index=df.index)
-    return pd.concat([df, eval_df], axis=1)
+    eval_df = pd.DataFrame(results, index=df_clean.index)
+    # Use the cleaned DataFrame for concatenation
+    return pd.concat([df_clean, eval_df], axis=1)
 
 
 def select_d_optimal_candidates(
@@ -161,16 +163,13 @@ def select_d_optimal_candidates(
 
     bconf = BBasisConfiguration(potential_file)
     
-    # The `select_structures_maxvol` tool from pyace expects a column named 'df'
-    # but works on the entire DataFrame. We pass our prepared DataFrame directly.
     df_selected = select_structures_maxvol(
-        df=candidate_df, # Pass the DataFrame directly
+        df=candidate_df,
         bconf=bconf,
         extra_A0_projections_dict=extra_projs,
         max_structures=max_to_select
     )
 
-    # The function returns a DataFrame with a selection, we can just return it
     return df_selected
 
 
@@ -207,17 +206,16 @@ def evaluate_and_select(
 
         logging.info(f"\nPerforming D-optimal selection for {select_n} candidates...")
         
-        candidate_pool_df = evaluated_df.copy() # Start with all evaluated structures
+        candidate_pool_df = evaluated_df.copy()
         if asi_file and 'max_gamma' in evaluated_df.columns and not evaluated_df['max_gamma'].isnull().all():
-            # If gamma is available, use it for pre-filtering
             gamma_filtered_pool = evaluated_df[evaluated_df['max_gamma'] > gamma_threshold].copy()
             if not gamma_filtered_pool.empty:
                 candidate_pool_df = gamma_filtered_pool
             else:
                 logging.warning(f"No structures found above gamma threshold > {gamma_threshold}. D-optimal selection will proceed on all structures if any.")
-        elif asi_file: # asi_file provided but max_gamma not usable
+        elif asi_file:
              logging.warning("asi_file provided, but 'max_gamma' column is not available or all NaN. D-optimal selection will proceed on all input structures.")
-        else: # No asi_file
+        else:
             logging.warning("No asi_file provided for gamma calculation. D-optimal selection will proceed on all input. Consider providing --asi for gamma-based pre-filtering.")
 
 
@@ -229,7 +227,7 @@ def evaluate_and_select(
             selected_df = select_d_optimal_candidates(
                 candidate_df=candidate_pool_df,
                 potential_file=potential_file,
-                max_to_select=len(candidate_pool_df), # Select all from the pool
+                max_to_select=len(candidate_pool_df),
                 active_set_file=asi_file
             )
         else:
