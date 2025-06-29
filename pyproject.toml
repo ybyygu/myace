@@ -20,6 +20,9 @@ dependencies = [
 ]
 readme = "README.md"
 
+[project.optional-dependencies]
+plotting = ["plotly>=6.2.0"]
+
 [project.scripts]
 collect-data = "myace.cli.collect_data:main"
 ace-learn = "myace.cli.active_learning_tool:main"
