@@ -136,7 +136,8 @@ def select_d_optimal_candidates(
     candidate_df: pd.DataFrame,
     potential_file: str,
     max_to_select: int,
-    active_set_file: Optional[str] = None
+    active_set_file: Optional[str] = None,
+    gamma_tolerance=1.01,
 ) -> pd.DataFrame:
     """
     Selects a D-optimal subset from a DataFrame of candidate structures.
@@ -167,7 +168,8 @@ def select_d_optimal_candidates(
         df=candidate_df,
         bconf=bconf,
         extra_A0_projections_dict=extra_projs,
-        max_structures=max_to_select
+        max_structures=max_to_select,
+        gamma_tolerance= gamma_tolerance,
     )
 
     return df_selected
@@ -178,7 +180,8 @@ def evaluate_and_select(
     potential_file: str,
     asi_file: Optional[str] = None,
     select_n: int = 0,
-    gamma_threshold: float = 5.0
+    gamma_threshold: float = 5.0,
+    gamma_tolerance: float = 1.01,
 ) -> tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     """
     High-level API to evaluate a DataFrame of configurations and optionally
@@ -228,13 +231,15 @@ def evaluate_and_select(
                 candidate_df=candidate_pool_df,
                 potential_file=potential_file,
                 max_to_select=len(candidate_pool_df),
-                active_set_file=asi_file
+                active_set_file=asi_file,
+                gamma_tolerance=gamma_tolerance,
             )
         else:
             selected_df = select_d_optimal_candidates(
                 candidate_df=candidate_pool_df,
                 potential_file=potential_file,
                 max_to_select=select_n,
+                gamma_tolerance=gamma_tolerance,
                 active_set_file=asi_file
             )
             
