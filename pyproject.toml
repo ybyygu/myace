@@ -6,17 +6,17 @@ authors = [
     { name = "Wenping Guo", email = "ybyygu@gmail.com" }
 ]
 dependencies = [
-    "tensorflow==2.16.1",
     "pip>=25.1.1",
-    "tensorpotential @ file:///home/ybyygu/Incoming/python/ace/TensorPotential",
-    "pyace @ file:///home/ybyygu/Incoming/python/ace/python-ace",
     "ipython>=8.18.1",
-    "maxvolpy @ file:///home/ybyygu/Incoming/python/ace/python-ace/lib/maxvolpy/maxvolpy-0.3.8-cp312-cp312-linux_x86_64.whl",
-    "cython>=3.1.2",
     "tqdm>=4.67.1",
     "pyarrow>=20.0.0",
     "polars>=1.31.0",
     "xlsxwriter>=3.2.5",
+    "tensorflow==2.16.1",
+    "pyace @ file:///home/ybyygu/Incoming/python/ace/python-ace",
+    "tensorpotential @ file:///home/ybyygu/Incoming/python/ace/TensorPotential",
+    "maxvolpy @ file:///home/ybyygu/Incoming/python/ace/python-ace/lib/maxvolpy/maxvolpy-0.3.8-cp312-cp312-linux_x86_64.whl",
+    "cython>=3.1.2",
 ]
 readme = "README.md"
 
@@ -30,6 +30,13 @@ ace-learn = "myace.cli.active_learning_tool:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+  # Exclude the entire /test directory from the build process.
+  "/test",
+  "/data",
+]
 
 [tool.rye]
 managed = true
