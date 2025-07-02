@@ -17,28 +17,6 @@ This toolkit is designed to support two primary workflows common in potential de
 
 **Goal:** To intelligently select the most valuable new structures for expensive DFT calculations from a large pool of unlabeled candidates (e.g., from an MD simulation).
 
-**Conceptual Flow:**
-
-```mermaid
-graph TD
-    subgraph "Phase 1: Explore & Select"
-        A["MD Trajectory<br><i>(many unlabeled structures)</i>"] -->|collect-data| B(structures_to_eval.pckl.gzip);
-        C[current_model.yaml] --> D["ace-learn --select N"];
-        B --> D;
-        D --> E[selected_for_dft/];
-    end
-
-    subgraph "Phase 2: Calculate & Collect"
-        E --> F["<b>Manual Step:</b><br>Run DFT on structures in the directory"];
-        F -->|`collect-data --format extxyz`| G(new_labeled_data.pckl.gzip);
-    end
-
-    subgraph "Phase 3: Up-fit & Iterate"
-        G --> H["<b>Manual Step:</b><br>Merge with old data &<br>Up-fit the model"];
-        H --> C;
-    end
-```
-
 **Step-by-Step Guide:**
 
 1. **Prepare Exploration Set**: Use `collect-data` to parse a large number of unlabeled structures (e.g., from a LAMMPS dump or `.xyz` trajectory) into a standardized DataFrame.
@@ -65,27 +43,12 @@ graph TD
    collect-data selected_for_dft/ --format extxyz --ref-energies ref.json --output new_labeled_data.pckl.gzip
    ```
 
-5. **Up-fit and Iterate**: Merge `new_labeled_data.pckl.gzip` with your main training set and re-train (or up-fit) your potential to create the next-generation model. The cycle then repeats.
+5. **Upfitting and Iterate**: Merge `new_labeled_data.pckl.gzip` with your main training set and re-train (or up-fit) your potential to create the next-generation model. The cycle then repeats.
 
 
 ### Workflow B: Training Set Analysis — Refining Known Data
 
 **Goal:** To analyze a model's performance on its own training set to identify high-error structures, or to distill a smaller, core set of "support" structures.
-
-**Conceptual Flow:**
-
-```mermaid
-graph TD
-    A["Full Training Set<br><i>(training_data.pckl.gzip)</i>"] --> B(Train Model);
-    B --> C(model.yaml);
-
-    A --> D["ace-learn"];
-    C --> D;
-
-    D --> E[evaluated_training_set.pckl.gzip];
-    E --> F["<b>Analysis Step:</b><br>Filter by error/gamma in a script or notebook"];
-    F --> G[Distilled/High-Error Set];
-```
 
 **Step-by-Step Guide:**
 
@@ -94,7 +57,7 @@ graph TD
 2. **Perform Self-Evaluation**: Run `ace-learn` on the training set itself. Since the input DataFrame contains `energy` and `forces` columns, the output will automatically include error metrics.
 
    ```bash
-   ace-learn model.yaml training_data.pckl.gzip --asi model.asi --output-eval-df evaluated_training_set.pckl.gzip
+   ace-learn model.yaml training_data.pckl.gzip --asi model.asi
    ```
 
 3. **Analyze and Distill**: Load the resulting `evaluated_training_set.pckl.gzip` into a Python script or Jupyter Notebook. You can now easily sort and filter this DataFrame by `max_gamma`, `energy_error_per_atom`, or `forces_rmse` to:
